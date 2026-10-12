@@ -124,7 +124,12 @@ class SplashController<T>(private val activity: T)
         }
 
         // Validate stub APK
-        if (isRunningAsStub && (
+        // CUSTOM BUILD: the stub / repackage machinery is disabled entirely.
+        // This watch build is installed as the regular full APK, so there is no
+        // stub to validate and we must never let the app replace itself with
+        // assets/stub.apk (which is what made previously patched APKs turn into
+        // a 29 KB stub on launch).
+        if (false && isRunningAsStub && (
                 // Version mismatch
                 Info.stub!!.version != BuildConfig.STUB_VERSION ||
                 // Not properly patched

@@ -36,6 +36,27 @@ fun Context.wrap(): Context {
     }
 }
 
+/**
+ * Custom UI density for the Magisk app only.
+ *
+ * The target watch panel is physically 402x476 px @ 320 dpi, which leaves the
+ * Compose UI far too cramped. Overriding densityDpi on the app's own
+ * Configuration scales every dp inside Magisk while leaving the system-wide
+ * density untouched, so every other app keeps the factory 320 dpi.
+ *
+ * Set to 0 (or any non-positive value) to restore the system density.
+ */
+const val APP_DENSITY_DPI = 190
+
+/** Returns a Context whose Configuration carries [APP_DENSITY_DPI]. */
+fun Context.withAppDensity(): Context {
+    if (APP_DENSITY_DPI <= 0) return this
+    val override = Configuration(resources.configuration)
+    if (override.densityDpi == APP_DENSITY_DPI) return this
+    override.densityDpi = APP_DENSITY_DPI
+    return createConfigurationContext(override)
+}
+
 fun Class<*>.cmp(pkg: String) =
     ComponentName(pkg, Info.stub?.classToComponent?.get(name) ?: name)
 
@@ -51,4 +72,5 @@ val shouldKeepResources = listOf(
     R.string.app_changelog,
     R.string.home_item_source,
     R.drawable.ic_more,
+    R.array.allow_timeout,
 )

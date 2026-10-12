@@ -6,7 +6,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.content.res.Resources
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
@@ -43,6 +42,7 @@ import com.topjohnwu.magisk.core.base.SplashScreenHost
 import com.topjohnwu.magisk.core.isRunningAsStub
 import com.topjohnwu.magisk.core.ktx.toast
 import com.topjohnwu.magisk.core.tasks.AppMigration
+import com.topjohnwu.magisk.core.withAppDensity
 import com.topjohnwu.magisk.core.wrap
 import com.topjohnwu.magisk.ui.component.rememberConfirmDialog
 import com.topjohnwu.magisk.ui.deny.DenyListScreen
@@ -57,8 +57,6 @@ import com.topjohnwu.magisk.ui.navigation.Navigator
 import com.topjohnwu.magisk.ui.navigation.Route
 import com.topjohnwu.magisk.ui.navigation.rememberNavigator
 import com.topjohnwu.magisk.ui.superuser.SuperuserDetailScreen
-import com.topjohnwu.magisk.ui.superuser.SuperuserGrantScreen
-import com.topjohnwu.magisk.ui.superuser.SuperuserGrantViewModel
 import com.topjohnwu.magisk.ui.superuser.SuperuserViewModel
 import com.topjohnwu.magisk.view.Shortcuts
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,19 +75,15 @@ class MainActivity : ComponentActivity(), SplashScreenHost {
     internal val showShortcutPrompt = MutableStateFlow(false)
 
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(base.wrap())
+        super.attachBaseContext(base.withAppDensity().wrap())
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         extension.onCreate(savedInstanceState)
         splashController.preOnCreate()
+        theme.applyStyle(R.style.Main, true)
         super.onCreate(savedInstanceState)
         splashController.onCreate(savedInstanceState)
-    }
-
-    override fun onApplyThemeResource(theme: Resources.Theme, resid: Int, first: Boolean) {
-        super.onApplyThemeResource(theme, resid, first)
-        theme.applyStyle(R.style.Main, true)
     }
 
     override fun onResume() {
@@ -176,19 +170,6 @@ class MainActivity : ComponentActivity(), SplashScreenHost {
                                         onAuthenticate = { action ->
                                             extension.withAuthentication { if (it) action() }
                                         }
-                                    )
-                                }
-                                entry<Route.SuperuserGrant> { _ ->
-                                    val vm: SuperuserGrantViewModel = viewModel(factory = VMFactory)
-                                    LaunchedEffect(Unit) {
-                                        vm.authenticate = { onSuccess ->
-                                            extension.withAuthentication { if (it) onSuccess() }
-                                        }
-                                        vm.startLoading()
-                                    }
-                                    SuperuserGrantScreen(
-                                        viewModel = vm,
-                                        onBack = { navigator.pop() },
                                     )
                                 }
                                 entry<Route.Action> { key ->

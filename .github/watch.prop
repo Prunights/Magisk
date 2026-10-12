@@ -1,0 +1,7 @@
+# Build config for the OPPO Watch 2 (OW20W3) custom build.
+#
+# The watch is a 32-bit armv7l device (msm8937, kernel 4.9.193-perf+,
+# aarch32), so only armeabi-v7a is needed. Restricting abiList keeps the
+# APK at roughly half the size of the stock all-ABI build and shortens
+# the native compile step.
+abiList=armeabi-v7a

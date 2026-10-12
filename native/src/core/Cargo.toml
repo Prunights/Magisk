@@ -8,7 +8,14 @@ crate-type = ["staticlib"]
 path = "lib.rs"
 
 [features]
-default = ["check-signature", "check-client", "su-check-db"]
+# CUSTOM BUILD: `check-signature` is intentionally removed from the defaults.
+# With it enabled, magiskd compares the manager APK's signing certificate
+# against the one baked into the daemon and, on mismatch, runs
+# `pm_install /data/stub.apk` + `pm_uninstall com.topjohnwu.magisk`
+# (see package.rs, Status::CertMismatch). A locally built APK can never carry
+# the upstream certificate, so the flag must be off for this build.
+# `check-client` and `su-check-db` are kept so su requests stay validated.
+default = ["check-client", "su-check-db"]
 
 # Disable these features for easier debugging during development
 check-signature = []
