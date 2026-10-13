@@ -4,17 +4,13 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatePriority
-import androidx.compose.foundation.ScrollIndicatorState
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 interface ScrollbarStateAdapter {
@@ -96,65 +91,80 @@ fun rememberScrollbarAdapter(scrollState: ScrollState): ScrollbarStateAdapter {
     }
 }
 
-// Works for any scrollable that reports a ScrollIndicatorState (lazy lists and grids).
-// For lazy layouts, the offset and content size are estimates.
 @Composable
-fun rememberScrollbarAdapter(state: ScrollableState): ScrollbarStateAdapter {
-    return remember(state) {
+fun rememberScrollbarAdapter(lazyListState: LazyListState): ScrollbarStateAdapter {
+    return remember(lazyListState) {
         object : ScrollbarStateAdapter {
-            // null if unsupported or not measured yet (values are Int.MAX_VALUE until then)
-            private val info: ScrollIndicatorState?
-                get() = state.scrollIndicatorState?.takeIf {
-                    it.scrollOffset != Int.MAX_VALUE &&
-                        it.contentSize != Int.MAX_VALUE &&
-                        it.viewportSize != Int.MAX_VALUE
-                }
-
-            private val range: Int
-                get() = info?.let { (it.contentSize - it.viewportSize).coerceAtLeast(0) } ?: 0
-
             override val isScrollable: Boolean
-                get() = range > 0
+                get() {
+                    val layoutInfo = lazyListState.layoutInfo
+                    val totalItems = layoutInfo.totalItemsCount
+                    if (totalItems == 0) return false
+                    val visibleItems = layoutInfo.visibleItemsInfo
+                    if (visibleItems.isEmpty()) return false
+                    if (visibleItems.size < totalItems) return true
+                    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+                    val totalVisibleHeight = visibleItems.sumOf { it.size }
+                    return totalVisibleHeight > viewportHeight
+                }
 
             override val thumbRatio: Float
                 get() {
-                    val info = info ?: return 1f
-                    return if (range > 0) {
-                        (info.viewportSize.toFloat() / info.contentSize).coerceIn(0.08f, 1f)
+                    val layoutInfo = lazyListState.layoutInfo
+                    val totalItems = layoutInfo.totalItemsCount
+                    val visibleItems = layoutInfo.visibleItemsInfo
+                    if (totalItems == 0 || visibleItems.isEmpty()) return 1f
+                    val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).toFloat()
+                    val avgItemSize = visibleItems.sumOf { it.size }.toFloat() / visibleItems.size
+                    val totalEstimatedHeight = avgItemSize * totalItems
+                    return if (totalEstimatedHeight > 0f) {
+                        (viewportHeight / totalEstimatedHeight).coerceIn(0.08f, 1f)
                     } else 1f
                 }
 
             override val offsetRatio: Float
                 get() {
-                    val info = info ?: return 0f
-                    return if (range > 0) {
-                        (info.scrollOffset.toFloat() / range).coerceIn(0f, 1f)
-                    } else 0f
+                    val layoutInfo = lazyListState.layoutInfo
+                    val totalItems = layoutInfo.totalItemsCount
+                    val visibleItems = layoutInfo.visibleItemsInfo
+                    if (totalItems == 0 || visibleItems.isEmpty()) return 0f
+                    val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).toFloat()
+                    val avgItemSize = visibleItems.sumOf { it.size }.toFloat() / visibleItems.size
+                    val totalEstimatedHeight = avgItemSize * totalItems
+                    val maxOffset = (totalEstimatedHeight - viewportHeight).coerceAtLeast(1f)
+                    val currentOffset = lazyListState.firstVisibleItemIndex * avgItemSize + lazyListState.firstVisibleItemScrollOffset
+                    return (currentOffset / maxOffset).coerceIn(0f, 1f)
                 }
 
-            private val itemCount: Int
-                get() = when (state) {
-                    is LazyListState -> state.layoutInfo.totalItemsCount
-                    is LazyGridState -> state.layoutInfo.totalItemsCount
-                    is LazyStaggeredGridState -> state.layoutInfo.totalItemsCount
-                    else -> 0
+            private fun calculateTarget(fraction: Float): Pair<Int, Int>? {
+                val layoutInfo = lazyListState.layoutInfo
+                val totalItems = layoutInfo.totalItemsCount
+                val visibleItems = layoutInfo.visibleItemsInfo
+                if (totalItems == 0 || visibleItems.isEmpty()) return null
+                val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).toFloat()
+                val avgItemSize = visibleItems.sumOf { it.size }.toFloat() / visibleItems.size
+                val totalEstimatedHeight = avgItemSize * totalItems
+                val maxOffset = (totalEstimatedHeight - viewportHeight).coerceAtLeast(0f)
+                val targetScrollOffset = fraction.coerceIn(0f, 1f) * maxOffset
+                val exactItem = if (avgItemSize > 0f) targetScrollOffset / avgItemSize else 0f
+                val targetIndex = exactItem.toInt().coerceIn(0, totalItems - 1)
+                val remainder = exactItem - targetIndex
+                val offset = (remainder * avgItemSize).roundToInt().coerceAtLeast(0)
+                return Pair(targetIndex, offset)
+            }
+
+            override suspend fun drag(block: suspend (onScroll: suspend (Float) -> Unit) -> Unit) {
+                lazyListState.scroll(MutatePriority.PreventUserInput) {}
+                block { fraction ->
+                    calculateTarget(fraction)?.let { (index, offset) ->
+                        lazyListState.scrollToItem(index, offset)
+                    }
                 }
+            }
 
             override suspend fun scrollTo(fraction: Float) {
-                val info = info ?: return
-                val target = fraction.coerceIn(0f, 1f) * range
-                val delta = target - info.scrollOffset
-                val count = itemCount
-                if (count > 0 && abs(delta) > info.viewportSize) {
-                    // Jump by index, as scrolling by a large delta composes every item in between
-                    val index = (target / info.contentSize * count).toInt().coerceIn(0, count - 1)
-                    when (state) {
-                        is LazyListState -> state.scrollToItem(index)
-                        is LazyGridState -> state.scrollToItem(index)
-                        is LazyStaggeredGridState -> state.scrollToItem(index)
-                    }
-                } else {
-                    state.scroll(MutatePriority.PreventUserInput) { scrollBy(delta) }
+                calculateTarget(fraction)?.let { (index, offset) ->
+                    lazyListState.scrollToItem(index, offset)
                 }
             }
         }
@@ -265,7 +275,7 @@ fun Modifier.horizontalScrollbar(
 }
 
 fun Modifier.verticalScrollbar(
-    state: ScrollableState,
+    state: LazyListState,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     thumbColor: Color? = null,
 ): Modifier = composed {
@@ -370,7 +380,14 @@ fun Modifier.verticalScrollbar(
             val paddingEnd = contentPadding.calculateEndPadding(layoutDirection).toPx()
             val hitWidthPx = hitTargetWidth.toPx()
             val minThumbHeightPx = minThumbHeight.toPx()
-            val hitPaddingY = 16.dp.toPx()
+
+            fun calculateFraction(y: Float, height: Float, thumbH: Float): Float {
+                val trackHeight = height - paddingTop - paddingBottom
+                val availableHeight = trackHeight - thumbH
+                return if (availableHeight > 0f) {
+                    ((y - paddingTop - thumbH / 2f) / availableHeight).coerceIn(0f, 1f)
+                } else 0f
+            }
 
             awaitEachGesture {
                 val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
@@ -387,22 +404,11 @@ fun Modifier.verticalScrollbar(
                 val availableHeight = trackHeight - thumbH
                 if (availableHeight <= 0f) return@awaitEachGesture
 
-                val thumbTop = paddingTop + availableHeight * adapter.offsetRatio
-                val isOverThumb = down.position.y in (thumbTop - hitPaddingY)..(thumbTop + thumbH + hitPaddingY)
-
-                if (alphaAnim.value > 0f && isHit && isOverThumb) {
+                if (isHit && down.position.y in paddingTop..(height - paddingBottom)) {
                     down.consume()
                     isDragging = true
                     coroutineScope.launch { alphaAnim.snapTo(1f) }
-
-                    val grabOffsetY = down.position.y - thumbTop
-
-                    fun calculateFraction(y: Float): Float {
-                        val targetThumbTop = y - grabOffsetY
-                        return ((targetThumbTop - paddingTop) / availableHeight).coerceIn(0f, 1f)
-                    }
-
-                    val initialFraction = calculateFraction(down.position.y)
+                    val initialFraction = calculateFraction(down.position.y, height, thumbH)
                     dragFraction = initialFraction
 
                     val channel = Channel<Float>(Channel.CONFLATED)
@@ -424,7 +430,7 @@ fun Modifier.verticalScrollbar(
                             if (!change.pressed) break
                             change.consume()
 
-                            val fraction = calculateFraction(change.position.y)
+                            val fraction = calculateFraction(change.position.y, height, thumbH)
                             dragFraction = fraction
                             channel.trySend(fraction)
                         }
@@ -516,7 +522,18 @@ fun Modifier.horizontalScrollbar(
             val paddingEnd = contentPadding.calculateEndPadding(layoutDirection).toPx()
             val hitHeightPx = hitTargetHeight.toPx()
             val minThumbWidthPx = minThumbWidth.toPx()
-            val hitPaddingX = 16.dp.toPx()
+
+            fun calculateFraction(x: Float, width: Float, thumbW: Float): Float {
+                val trackWidth = width - paddingStart - paddingEnd
+                val availableWidth = trackWidth - thumbW
+                return if (availableWidth > 0f) {
+                    val rawX = when (layoutDirection) {
+                        LayoutDirection.Ltr -> x - paddingStart - thumbW / 2f
+                        LayoutDirection.Rtl -> (width - paddingEnd - x) - thumbW / 2f
+                    }
+                    (rawX / availableWidth).coerceIn(0f, 1f)
+                } else 0f
+            }
 
             awaitEachGesture {
                 val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
@@ -530,31 +547,11 @@ fun Modifier.horizontalScrollbar(
                 val availableWidth = trackWidth - thumbW
                 if (availableWidth <= 0f) return@awaitEachGesture
 
-                val offset = availableWidth * adapter.offsetRatio
-                val thumbLeft = when (layoutDirection) {
-                    LayoutDirection.Ltr -> paddingStart + offset
-                    LayoutDirection.Rtl -> width - paddingEnd - offset - thumbW
-                }
-                val thumbRight = thumbLeft + thumbW
-                val isOverThumb = down.position.x in (thumbLeft - hitPaddingX)..(thumbRight + hitPaddingX)
-
-                if (alphaAnim.value > 0f && isHit && isOverThumb) {
+                if (isHit && down.position.x in paddingStart..(width - paddingEnd)) {
                     down.consume()
                     isDragging = true
                     coroutineScope.launch { alphaAnim.snapTo(1f) }
-
-                    val grabOffsetX = down.position.x - thumbLeft
-
-                    fun calculateFraction(x: Float): Float {
-                        val targetThumbLeft = x - grabOffsetX
-                        val rawOffset = when (layoutDirection) {
-                            LayoutDirection.Ltr -> targetThumbLeft - paddingStart
-                            LayoutDirection.Rtl -> width - paddingEnd - targetThumbLeft - thumbW
-                        }
-                        return (rawOffset / availableWidth).coerceIn(0f, 1f)
-                    }
-
-                    val initialFraction = calculateFraction(down.position.x)
+                    val initialFraction = calculateFraction(down.position.x, width, thumbW)
                     dragFraction = initialFraction
 
                     val channel = Channel<Float>(Channel.CONFLATED)
@@ -576,7 +573,7 @@ fun Modifier.horizontalScrollbar(
                             if (!change.pressed) break
                             change.consume()
 
-                            val fraction = calculateFraction(change.position.x)
+                            val fraction = calculateFraction(change.position.x, width, thumbW)
                             dragFraction = fraction
                             channel.trySend(fraction)
                         }

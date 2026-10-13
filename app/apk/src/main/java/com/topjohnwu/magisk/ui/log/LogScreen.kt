@@ -3,7 +3,6 @@ package com.topjohnwu.magisk.ui.log
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -55,8 +49,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -143,10 +135,7 @@ fun LogScreen(
                 PrimaryTabRow(
                     selectedTabIndex = pagerState.currentPage,
                     containerColor = Color.Transparent,
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .widthIn(max = 960.dp)
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     tabTitles.forEachIndexed { index, title ->
                         Tab(
@@ -174,38 +163,17 @@ fun LogScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                beyondViewportPageCount = 0,
+                beyondViewportPageCount = 1,
             ) { page ->
-                val isCurrentLogPage = pagerState.currentPage == page
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .focusProperties {
-                            onEnter = {
-                                if (!isCurrentLogPage) {
-                                    cancelFocusChange()
-                                }
-                            }
-                            onExit = {
-                                if (requestedFocusDirection == FocusDirection.Left ||
-                                    requestedFocusDirection == FocusDirection.Right
-                                ) {
-                                    cancelFocusChange()
-                                }
-                            }
-                        }
-                        .focusGroup()
-                ) {
-                    when (page) {
-                        0 -> SuLogTab(
-                            logs = uiState.suLogs,
-                            nestedScrollConnection = scrollBehavior.nestedScrollConnection
-                        )
-                        1 -> MagiskLogTab(
-                            entries = uiState.magiskLogEntries,
-                            nestedScrollConnection = scrollBehavior.nestedScrollConnection
-                        )
-                    }
+                when (page) {
+                    0 -> SuLogTab(
+                        logs = uiState.suLogs,
+                        nestedScrollConnection = scrollBehavior.nestedScrollConnection
+                    )
+                    1 -> MagiskLogTab(
+                        entries = uiState.magiskLogEntries,
+                        nestedScrollConnection = scrollBehavior.nestedScrollConnection
+                    )
                 }
             }
         }
@@ -235,17 +203,15 @@ private fun SuLogTab(
                 )
             }
         } else {
-            val gridState = rememberLazyGridState()
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(320.dp),
-                state = gridState,
+            val listState = rememberLazyListState()
+            LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .nestedScroll(nestedScrollConnection)
-                    .verticalScrollbar(gridState, contentPadding = PaddingValues(vertical = 12.dp)),
+                    .verticalScrollbar(listState, contentPadding = PaddingValues(vertical = 12.dp)),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(
                     items = logs,
@@ -405,19 +371,16 @@ private fun MagiskLogTab(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
                     .nestedScroll(nestedScrollConnection)
                     .verticalScrollbar(listState, contentPadding = PaddingValues(vertical = 12.dp)),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                // A log reads top to bottom, so keep one column but cap its width
-                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(
                     items = entries,
                     contentType = { "MagiskLogCard" }
                 ) { entry ->
-                    MagiskLogCard(entry = entry, modifier = Modifier.widthIn(max = 960.dp))
+                    MagiskLogCard(entry = entry)
                 }
             }
         }

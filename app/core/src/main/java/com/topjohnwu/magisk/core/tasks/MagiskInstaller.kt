@@ -1,7 +1,6 @@
 package com.topjohnwu.magisk.core.tasks
 
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
 import androidx.annotation.WorkerThread
@@ -16,12 +15,12 @@ import com.topjohnwu.magisk.core.di.ServiceLocator
 import com.topjohnwu.magisk.core.isRunningAsStub
 import com.topjohnwu.magisk.core.ktx.copyAll
 import com.topjohnwu.magisk.core.ktx.writeTo
-import com.topjohnwu.magisk.core.utils.DataChannel
+import com.topjohnwu.magisk.core.utils.DataSourceChannel
 import com.topjohnwu.magisk.core.utils.DummyList
 import com.topjohnwu.magisk.core.utils.MediaStoreUtils
+import com.topjohnwu.magisk.core.utils.MediaStoreUtils.inputStream
 import com.topjohnwu.magisk.core.utils.MediaStoreUtils.openFd
 import com.topjohnwu.magisk.core.utils.MediaStoreUtils.outputStream
-import com.topjohnwu.magisk.core.utils.ProgressInputStream
 import com.topjohnwu.magisk.core.utils.RootUtils
 import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ShellUtils
@@ -30,32 +29,24 @@ import com.topjohnwu.superuser.nio.ExtendedFile
 import com.topjohnwu.superuser.nio.FileSystemManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.archivers.zip.ZipFile
+import org.apache.commons.compress.compressors.lz4.FramedLZ4CompressorInputStream
 import timber.log.Timber
-import java.io.Closeable
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.PushbackInputStream
+import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
-
-interface WholeFilePatcher : Closeable {
-    @Throws(IOException::class)
-    suspend fun start(input: InputStream): ExtendedFile
-
-    @Throws(IOException::class)
-    suspend fun finish(patched: ExtendedFile)
-
-    // Release resources if the patching process is aborted before finish
-    override fun close() {}
-}
-
-interface ImageExtractor {
-    @Throws(IOException::class)
-    suspend fun extract(channel: DataChannel)
-}
 
 abstract class MagiskInstallImpl protected constructor(
     protected val console: MutableList<String>,
@@ -63,10 +54,10 @@ abstract class MagiskInstallImpl protected constructor(
 ) {
 
     private lateinit var installDir: ExtendedFile
-    private lateinit var targetImage: ExtendedFile
+    private lateinit var srcBoot: ExtendedFile
 
     private val shell = Shell.getShell()
-    private val useRootFs = shell.isRoot && Info.noDataExec
+    private val useRootDir = shell.isRoot && Info.noDataExec
     protected val context get() = ServiceLocator.deContext
 
     private val rootFS get() = RootUtils.fs
@@ -99,7 +90,7 @@ abstract class MagiskInstallImpl protected constructor(
             console.add("! Unable to detect target image")
             return false
         }
-        targetImage = rootFS.getFile(bootPath)
+        srcBoot = rootFS.getFile(bootPath)
         console.add("- Target image: $bootPath")
         return true
     }
@@ -173,13 +164,20 @@ abstract class MagiskInstallImpl protected constructor(
                 val dest = File(installDir, script)
                 context.assets.open(script).writeTo(dest)
             }
+            // Extract chromeos tools
+            File(installDir, "chromeos").mkdir()
+            for (file in listOf("futility", "kernel_data_key.vbprivk", "kernel.keyblock")) {
+                val name = "chromeos/$file"
+                val dest = File(installDir, name)
+                context.assets.open(name).writeTo(dest)
+            }
         } catch (e: Exception) {
             console.add("! Unable to extract files")
             Timber.e(e)
             return false
         }
 
-        if (useRootFs) {
+        if (useRootDir) {
             // Move everything to tmpfs to workaround Samsung bullshit
             rootFS.getFile(Const.TMPDIR).also {
                 arrayOf(
@@ -198,118 +196,196 @@ abstract class MagiskInstallImpl protected constructor(
     private suspend fun InputStream.copyAndCloseOut(out: OutputStream) =
         out.use { copyAll(it, 1024 * 1024) }
 
+    private class NoAvailableStream(s: InputStream) : FilterInputStream(s) {
+        // Make sure available is never called on the actual stream and always return 0
+        // to reduce max buffer size and avoid OOM
+        override fun available() = 0
+    }
+
+    private class NoBootException : IOException()
+
+    inner class BootItem(private val entry: TarArchiveEntry) {
+        val name = entry.name.replace(".lz4", "")
+        var file = installDir.getChildFile(name)
+
+        suspend fun copyTo(tarOut: TarArchiveOutputStream) {
+            entry.name = name
+            entry.size = file.length()
+            file.newInputStream().use {
+                console.add("-- Writing   : $name")
+                tarOut.putArchiveEntry(entry)
+                it.copyAll(tarOut)
+                tarOut.closeArchiveEntry()
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private suspend fun processTar(
+        tarIn: TarArchiveInputStream,
+        tarOut: TarArchiveOutputStream
+    ): BootItem {
+        console.add("- Processing tar file")
+        var entry: TarArchiveEntry? = tarIn.nextEntry
+
+        fun decompressedStream(): InputStream {
+            val stream = if (tarIn.currentEntry.name.endsWith(".lz4"))
+                FramedLZ4CompressorInputStream(tarIn, true) else tarIn
+            return NoAvailableStream(stream)
+        }
+
+        var boot: BootItem? = null
+        var initBoot: BootItem? = null
+        var recovery: BootItem? = null
+
+        while (entry != null) {
+            val bootItem: BootItem?
+            if (entry.name.startsWith("boot.img")) {
+                bootItem = BootItem(entry)
+                boot = bootItem
+            } else if (entry.name.startsWith("init_boot.img")) {
+                bootItem = BootItem(entry)
+                initBoot = bootItem
+            } else if (Config.recovery && entry.name.contains("recovery.img")) {
+                bootItem = BootItem(entry)
+                recovery = bootItem
+            } else {
+                bootItem = null
+            }
+
+            if (bootItem != null) {
+                console.add("-- Extracting: ${bootItem.name}")
+                decompressedStream().copyAndCloseOut(bootItem.file.newOutputStream())
+            } else if (entry.name.contains("vbmeta.img")) {
+                val rawData = decompressedStream().readBytes()
+                // Valid vbmeta.img should be at least 256 bytes
+                if (rawData.size < 256)
+                    continue
+
+                // vbmeta partition exist, disable boot vbmeta patch
+                Info.patchBootVbmeta = false
+
+                val name = entry.name.replace(".lz4", "")
+                console.add("-- Patching  : $name")
+
+                // Patch flags to AVB_VBMETA_IMAGE_FLAGS_HASHTREE_DISABLED |
+                // AVB_VBMETA_IMAGE_FLAGS_VERIFICATION_DISABLED
+                ByteBuffer.wrap(rawData).putInt(120, 3)
+
+                // Fetch the next entry first before modifying current entry
+                val vbmeta = entry
+                entry = tarIn.nextEntry
+
+                // Update entry with new information
+                vbmeta.name = name
+                vbmeta.size = rawData.size.toLong()
+
+                // Write output
+                tarOut.putArchiveEntry(vbmeta)
+                tarOut.write(rawData)
+                tarOut.closeArchiveEntry()
+                continue
+            } else if (entry.name.contains("userdata.img")) {
+                console.add("-- Skipping  : ${entry.name}")
+            } else {
+                console.add("-- Copying   : ${entry.name}")
+                tarOut.putArchiveEntry(entry)
+                tarIn.copyAll(tarOut)
+                tarOut.closeArchiveEntry()
+            }
+            entry = tarIn.nextEntry ?: break
+        }
+
+        // Patch priority: recovery > init_boot > boot
+        return when {
+            recovery != null -> {
+                if (boot != null) {
+                    // Repack boot image to prevent auto restore
+                    arrayOf(
+                        "cd $installDir",
+                        "chmod -R 755 .",
+                        "./magiskboot unpack boot.img",
+                        "./magiskboot repack boot.img",
+                        "cat new-boot.img > boot.img",
+                        "./magiskboot cleanup",
+                        "rm -f new-boot.img",
+                        "cd /").sh()
+                    boot.copyTo(tarOut)
+                }
+                recovery
+            }
+            initBoot != null -> {
+                boot?.copyTo(tarOut)
+                initBoot
+            }
+            boot != null -> boot
+            else -> throw NoBootException()
+        }
+    }
+
     private suspend fun processFile(uri: Uri): Boolean {
-        val input = try {
-            DataChannel.File(ParcelFileDescriptor.AutoCloseInputStream(uri.openFd()).channel)
-        } catch (e: IOException) {
-            console.add("! Process error")
-            Timber.e(e)
-            return false
-        }
-        return processInput(input)
-    }
+        val outStream: OutputStream
+        val outFile: MediaStoreUtils.UriFile
+        var bootItem: BootItem? = null
 
-    private suspend fun processUrl(url: String): Boolean {
-        val input = try {
-            DataChannel.Http(ServiceLocator.okhttp, url)
-        } catch (e: IOException) {
-            console.add("! Error: " + e.message)
-            Timber.e(e)
-            return false
-        }
-        return processInput(input)
-    }
-
-    private fun PatchFileClassifier.openProgressStream(): InputStream {
-        val max = size
-        val total = max.toFloat() / 1048576
-        var prevBytes = 0L
-        var prevTime = 0L
-        var smoothedSpeed = -1f
-        return ProgressInputStream(openStream()) { bytes ->
-            val now = System.currentTimeMillis()
-            val dt = now - prevTime
-            if (prevTime == 0L || dt <= 0) {
-                prevBytes = bytes
-                prevTime = now
-                return@ProgressInputStream
-            }
-            val instantSpeed = (bytes - prevBytes).toFloat() * 1000 / dt / 1048576
-            smoothedSpeed = if (smoothedSpeed < 0f) {
-                instantSpeed
-            } else {
-                0.3f * instantSpeed + 0.7f * smoothedSpeed
-            }
-            prevBytes = bytes
-            prevTime = now
-            val progress = bytes.toFloat() / 1048576
-            if (max > 0) {
-                val pct = bytes * 100 / max
-                console.add("\r%.2f / %.2f MB (%d%%) - %.2f MB/s".format(progress, total, pct, smoothedSpeed))
-            } else {
-                console.add("\r%.2f MB / ?? - %.2f MB/s".format(progress, smoothedSpeed))
-            }
-        }
-    }
-
-    private suspend fun processInput(input: DataChannel): Boolean {
+        // Process input file
         try {
-            input.use {
-                PatchFileClassifier(input).use { file ->
-                    logs.add("Input type: ${file.type}, payload: ${file.entryPath ?: "<input>"}")
-                    return when (file.type) {
-                        PatchFileClassifier.Type.Tar -> {
-                            processWholeFile(file.openProgressStream(), "tar") { out ->
-                                TarProcessor(installDir, out, console, logs)
+            PushbackInputStream(uri.inputStream().buffered(1024 * 1024), 512).use { src ->
+                val head = ByteArray(512)
+                if (src.read(head) != head.size) {
+                    console.add("! Invalid input file")
+                    return false
+                }
+                src.unread(head)
+
+                val magic = head.copyOf(4)
+                val tarMagic = head.copyOfRange(257, 262)
+
+                srcBoot = if (tarMagic.contentEquals("ustar".toByteArray())) {
+                    // tar file
+                    outFile = MediaStoreUtils.getFile("$destName.tar")
+                    val os = outFile.uri.outputStream().buffered(1024 * 1024)
+                    outStream = TarArchiveOutputStream(os).also {
+                        it.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_STAR)
+                        it.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU)
+                    }
+
+                    try {
+                        bootItem = processTar(TarArchiveInputStream(src), outStream)
+                        bootItem.file
+                    } catch (e: IOException) {
+                        outStream.close()
+                        outFile.delete()
+                        throw e
+                    }
+                } else {
+                    // raw image
+                    outFile = MediaStoreUtils.getFile("$destName.img")
+                    outStream = outFile.uri.outputStream()
+                    val channel = FileInputStream(uri.openFd().fileDescriptor).channel
+                    val boot = installDir.getChildFile("boot.img")
+
+                    try {
+                        if (magic.contentEquals("CrAU".toByteArray())) {
+                            DataSourceChannel(channel).use { source ->
+                                Payload(source).extract(boot, console, logs)
                             }
-                        }
-                        PatchFileClassifier.Type.RecoveryGpt -> {
-                            file.entryPath?.let { console.add("- Processing $it") }
-                            processWholeFile(file.openProgressStream(), "bin") { out ->
-                                RecoveryGptProcessor(installDir, out, console, logs)
-                            }
-                        }
-                        PatchFileClassifier.Type.PayloadBin -> extractAndProcessImage { out ->
-                            console.add("- Processing as OTA package")
-                            OtaPayloadExtractor(out, console, logs).extract(file.openChannel())
-                        }
-                        PatchFileClassifier.Type.BootZip -> extractAndProcessImage { out ->
-                            console.add("- Extracting: ${file.entryPath} (${file.size} bytes)")
-                            file.openStream().use { it.copyAndCloseOut(out.newOutputStream()) }
-                        }
-                        PatchFileClassifier.Type.RawFile -> extractAndProcessImage { out ->
+                        } else if (magic.contentEquals("PK\u0003\u0004".toByteArray())) {
+                            ExtractImage(boot, console, logs).consume(DataSourceChannel(channel))
+                        } else {
                             console.add("- Copying image to cache")
-                            file.openStream().use { it.copyAndCloseOut(out.newOutputStream()) }
+                            src.copyAndCloseOut(boot.newOutputStream())
                         }
+                        boot
+                    } catch (e: IOException) {
+                        outStream.close()
+                        outFile.delete()
+                        throw e
                     }
                 }
             }
         } catch (e: IOException) {
-            console.add("! Process error")
-            Timber.e(e)
-            return false
-        }
-    }
-
-    // Patch the boot image in a whole file (e.g. tar archive), and output a new file
-    // with all the original contents and the patched boot image
-    private suspend fun processWholeFile(
-        input: InputStream,
-        ext: String,
-        createPatcher: (OutputStream) -> WholeFilePatcher
-    ): Boolean {
-        val outFile = MediaStoreUtils.getFile("$destName.$ext")
-        val outStream = outFile.uri.outputStream().buffered(1024 * 1024)
-        val patcher = createPatcher(outStream)
-
-        // Process input file
-        try {
-            targetImage = patcher.start(input)
-        } catch (e: IOException) {
-            patcher.close()
-            runCatching { outStream.close() }
-            outFile.delete()
-            if (e is TarProcessor.NoBootException)
+            if (e is NoBootException)
                 console.add("! No boot image found")
             console.add("! Process error")
             Timber.e(e)
@@ -318,8 +394,6 @@ abstract class MagiskInstallImpl protected constructor(
 
         // Patch file
         if (!patchBoot()) {
-            patcher.close()
-            runCatching { outStream.close() }
             outFile.delete()
             return false
         }
@@ -327,46 +401,68 @@ abstract class MagiskInstallImpl protected constructor(
         // Output file
         try {
             val newBoot = installDir.getChildFile("new-boot.img")
-            patcher.finish(newBoot)
+            if (bootItem != null) {
+                bootItem.file = newBoot
+                bootItem.copyTo(outStream as TarArchiveOutputStream)
+            } else {
+                newBoot.newInputStream().use { it.copyAll(outStream, 1024 * 1024) }
+            }
             newBoot.delete()
+
+            console.add("")
+            console.add("****************************")
+            console.add(" Output file is written to ")
+            console.add(" $outFile ")
+            console.add("****************************")
         } catch (e: IOException) {
-            patcher.close()
             console.add("! Failed to output to $outFile")
             outFile.delete()
             Timber.e(e)
             return false
         } finally {
-            patcher.close()
             outStream.close()
         }
 
-        return onOutputWritten(outFile)
+        // Fix up binaries
+        srcBoot.delete()
+        "cp_readlink $installDir".sh()
+
+        return true
     }
 
-    // Extract the boot image from the input, and output the patched boot image
-    private suspend fun extractAndProcessImage(extract: suspend (ExtendedFile) -> Unit): Boolean {
-        // Process input file
-        targetImage = installDir.getChildFile("boot.img")
+    private fun processUrl(url: String): Boolean {
+        // Download image from url
         try {
-            extract(targetImage)
+            srcBoot = installDir.getChildFile("boot.img")
+            ExtractImage(srcBoot, console, logs)
+                .consume(DataSourceChannel(ServiceLocator.okhttp, url))
         } catch (e: IOException) {
-            console.add("! Process error")
+            console.add("! Error: " + e.message)
             Timber.e(e)
             return false
         }
 
         // Patch file
-        if (!patchBoot())
+        if (!patchBoot()) {
             return false
+        }
 
         // Output file
         val outFile = MediaStoreUtils.getFile("$destName.img")
         try {
             val newBoot = installDir.getChildFile("new-boot.img")
             outFile.uri.outputStream().use { out ->
-                newBoot.newInputStream().use { it.copyAll(out, 1024 * 1024) }
+                FileInputStream(newBoot).use { input ->
+                    input.copyTo(out)
+                }
             }
             newBoot.delete()
+
+            console.add("")
+            console.add("****************************")
+            console.add(" Output file is written to ")
+            console.add(" $outFile ")
+            console.add("****************************")
         } catch (e: IOException) {
             console.add("! Failed to output to $outFile")
             outFile.delete()
@@ -374,18 +470,8 @@ abstract class MagiskInstallImpl protected constructor(
             return false
         }
 
-        return onOutputWritten(outFile)
-    }
-
-    private fun onOutputWritten(outFile: MediaStoreUtils.UriFile): Boolean {
-        console.add("")
-        console.add("****************************")
-        console.add(" Output file is written to ")
-        console.add(" $outFile ")
-        console.add("****************************")
-
         // Fix up binaries
-        targetImage.delete()
+        srcBoot.delete()
         "cp_readlink $installDir".sh()
 
         return true
@@ -393,7 +479,7 @@ abstract class MagiskInstallImpl protected constructor(
 
     private fun patchBoot(): Boolean {
         val newBoot = installDir.getChildFile("new-boot.img")
-        if (!useRootFs) {
+        if (!useRootDir) {
             // Create output files before hand
             newBoot.createNewFile()
             File(installDir, "stock_boot.img").createNewFile()
@@ -406,7 +492,7 @@ abstract class MagiskInstallImpl protected constructor(
             "PATCHVBMETAFLAG=${Info.patchBootVbmeta} " +
             "RECOVERYMODE=${Config.recovery} " +
             "LEGACYSAR=${Info.legacySAR} " +
-            "sh boot_patch.sh $targetImage")
+            "sh boot_patch.sh $srcBoot")
         val isSuccess = cmds.sh().isSuccess
 
         shell.newJob().add("./magiskboot cleanup", "cd /").exec()
@@ -414,7 +500,7 @@ abstract class MagiskInstallImpl protected constructor(
         return isSuccess
     }
 
-    private fun flashBoot() = "direct_install $installDir $targetImage".sh().isSuccess
+    private fun flashBoot() = "direct_install $installDir $srcBoot".sh().isSuccess
 
     private fun postOTA(): Boolean {
         "post_ota".sh()
@@ -426,9 +512,11 @@ abstract class MagiskInstallImpl protected constructor(
         return true
     }
 
+    private fun Array<String>.eq() = shell.newJob().add(*this).to(console, logs).enqueue()
     private fun String.sh() = shell.newJob().add(this).to(console, logs).exec()
     private fun Array<String>.sh() = shell.newJob().add(*this).to(console, logs).exec()
     private fun String.fsh() = ShellUtils.fastCmd(shell, this)
+    private fun Array<String>.fsh() = ShellUtils.fastCmd(shell, *this)
 
     protected suspend fun patchFile(file: Uri) = extractFiles() && processFile(file)
 
@@ -441,7 +529,7 @@ abstract class MagiskInstallImpl protected constructor(
 
     protected suspend fun fixEnv() = extractFiles() && "fix_env $installDir".sh().isSuccess
 
-    protected fun restore() = findImage() && "restore_imgs $targetImage".sh().isSuccess
+    protected fun restore() = findImage() && "restore_imgs $srcBoot".sh().isSuccess
 
     protected fun uninstall() = "run_uninstaller $AppApkPath".sh().isSuccess
 

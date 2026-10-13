@@ -1,6 +1,5 @@
 use crate::consts::{APP_PACKAGE_NAME, BBPATH, DATABIN, MODULEROOT, SECURE_DIR};
 use crate::daemon::MagiskD;
-use crate::db::MultiuserMode;
 use crate::ffi::{
     DbEntryKey, RequestCode, check_key_combo, exec_common_scripts, exec_module_scripts,
     get_magisk_tmp, initialize_denylist,
@@ -35,21 +34,17 @@ impl MagiskD {
 
         let mut buf = cstr::buf::default();
 
-        for user in self.get_users() {
-            buf.append_path(self.app_data_dir())
-                .append_path_fmt(user)
-                .append_path(APP_PACKAGE_NAME)
-                .append_path("install");
-            if buf.exists() {
-                break;
-            }
-        }
+        let app_bin_dir = buf
+            .append_path(self.app_data_dir())
+            .append_path("0")
+            .append_path(APP_PACKAGE_NAME)
+            .append_path("install");
 
         // Alternative binaries paths
-        let alt_bin_dirs = [
+        let alt_bin_dirs = &[
             cstr!("/cache/data_adb/magisk"),
             cstr!("/data/magisk"),
-            &buf,
+            app_bin_dir,
         ];
         for dir in alt_bin_dirs {
             if dir.exists() {
@@ -129,11 +124,6 @@ impl MagiskD {
         }
 
         self.prune_su_access();
-
-        if self.is_headless {
-            self.set_db_setting(DbEntryKey::SuMultiuserMode, MultiuserMode::User as i32)
-                .log_ok();
-        }
 
         if !self.setup_magisk_env() {
             error!("* Magisk environment incomplete, abort");

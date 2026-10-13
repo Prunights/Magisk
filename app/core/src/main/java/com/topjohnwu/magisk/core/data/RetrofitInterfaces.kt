@@ -1,7 +1,6 @@
 package com.topjohnwu.magisk.core.data
 
 import com.topjohnwu.magisk.core.model.ModuleJson
-import com.topjohnwu.magisk.core.model.GooglebookRecoveryJson
 import com.topjohnwu.magisk.core.model.Release
 import com.topjohnwu.magisk.core.model.UpdateJson
 import okhttp3.ResponseBody
@@ -27,13 +26,6 @@ interface RawUrl {
 
     @GET
     suspend fun fetchUpdateJson(@Url url: String): UpdateJson
-
-    @GET
-    suspend fun fetchGooglebookRecoveryJson(@Url url: String): List<GooglebookRecoveryJson>
-
-    @GET
-    @Headers("Cookie: devsite_wall_acks=nexus-image-tos")
-    suspend fun fetchPixelFactoryImages(@Url url: String): String
 }
 
 interface GithubApiServices {

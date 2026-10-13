@@ -39,8 +39,6 @@ dependencies {
 
     // Compose
     implementation(libs.compose.ui)
-    implementation(libs.compose.animation)
-    implementation(libs.compose.foundation)
     implementation(libs.accompanist.drawablepainter)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
@@ -49,8 +47,6 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.compose.material3)
-    implementation(libs.compose.material3.adaptive.navigation.suite)
-    implementation(libs.window.core)
     implementation(libs.material)
 
     // Navigation3

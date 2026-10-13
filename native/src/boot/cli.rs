@@ -2,7 +2,6 @@ use crate::compress::{compress_cmd, decompress_cmd};
 use crate::cpio::{cpio_commands, print_cpio_usage};
 use crate::dtb::{DtbAction, dtb_commands, print_dtb_usage};
 use crate::ffi::{BootImage, FileFormat, cleanup, repack, split_image_dtb, unpack};
-use crate::futility::{CROS_ALIGN, align_up, chromeos_blob_trailer, sign_chromeos};
 use crate::patch::hexpatch;
 use crate::payload::extract_boot_from_payload;
 use crate::sign::{sha1_hash, sign_boot_image};
@@ -11,7 +10,7 @@ use base::libc::umask;
 use base::nix::fcntl::OFlag;
 use base::{
     CmdArgs, EarlyExitExt, LoggedResult, MappedFile, PositionalArgParser, ResultExt, Utf8CStr,
-    Utf8CStrBuf, Utf8CString, WriteExt, argh, cmdline_logging, cstr, log_err,
+    Utf8CString, WriteExt, argh, cmdline_logging, cstr, log_err,
 };
 use std::ffi::c_char;
 use std::io::{Seek, SeekFrom, Write};
@@ -29,8 +28,7 @@ enum Action {
     Unpack(Unpack),
     Repack(Repack),
     Verify(Verify),
-    SignAvb1(SignAvb1),
-    SignChromeOs(SignChromeOs),
+    Sign(Sign),
     Extract(Extract),
     HexPatch(HexPatch),
     Cpio(Cpio),
@@ -74,8 +72,8 @@ struct Verify {
 }
 
 #[derive(FromArgs)]
-#[argh(subcommand, name = "sign-avb1")]
-struct SignAvb1 {
+#[argh(subcommand, name = "sign")]
+struct Sign {
     #[argh(positional)]
     img: Utf8CString,
     #[argh(positional)]
@@ -84,15 +82,6 @@ struct SignAvb1 {
     cert: Option<Utf8CString>,
     #[argh(positional)]
     key: Option<Utf8CString>,
-}
-
-#[derive(FromArgs)]
-#[argh(subcommand, name = "sign-chromeos")]
-struct SignChromeOs {
-    #[argh(positional)]
-    img: Utf8CString,
-    #[argh(positional)]
-    out: Option<Utf8CString>,
 }
 
 #[derive(FromArgs)]
@@ -216,7 +205,7 @@ Supported actions:
     dumped to the file 'header', which can be used to modify header
     configurations during repacking.
     Return values:
-    0:valid    1:error    3:vendor_boot
+    0:valid    1:error    2:chromeos    3:vendor_boot
 
   repack [-n] <origbootimg> [outbootimg]
     Repack boot image components using files from the current directory
@@ -231,8 +220,6 @@ Supported actions:
     If '-n' is provided, all compression operations will be skipped.
     If env variable PATCHVBMETAFLAG is set to true, all disable flags in
     the boot image's vbmeta header will be set.
-    ChromeOS boot images will be automatically re-signed with the
-    developer keys bundled in the executable.
 
   verify <bootimg> [x509.pem]
     Check whether the boot image is signed with AVB 1.0 signature.
@@ -241,17 +228,12 @@ Supported actions:
     Return value:
     0:valid    1:error
 
-  sign-avb1 <bootimg> [name] [x509.pem pk8]
+  sign <bootimg> [name] [x509.pem pk8]
     Sign <bootimg> with AVB 1.0 signature.
     Optionally provide the name of the image (default: '/boot').
     Optionally provide the certificate/private key pair for signing.
     If the certificate/private key pair is not provided, the AOSP
     verity key bundled in the executable will be used.
-
-  sign-chromeos <bootimg> [outbootimg]
-    Sign <bootimg> with ChromeOS verified boot kernel signature, using
-    the developer keys bundled in the executable.
-    Output to [outbootimg], or overwrite <bootimg> if not specified.
 
   extract <payload.bin> [partition] [outfile]
     Extract [partition] from <payload.bin> to [outfile].
@@ -344,26 +326,6 @@ fn sign_cmd(
     Ok(())
 }
 
-fn sign_chromeos_cmd(image: &Utf8CStr, out: Option<&Utf8CStr>) -> LoggedResult<()> {
-    let out = out.unwrap_or(image);
-    let kernel = MappedFile::open(image)?;
-    let kernel = kernel.as_ref();
-    let vblock = sign_chromeos(kernel)?;
-
-    // Write to a temporary file first, as the output can be the same file as the input
-    let mut tmp = cstr::buf::default();
-    tmp.push_str(out);
-    tmp.push_str(".tmp");
-    let mut fd = tmp.create(OFlag::O_WRONLY | OFlag::O_TRUNC | OFlag::O_CLOEXEC, 0o644)?;
-    fd.write_all(&vblock)?;
-    fd.write_all(kernel)?;
-    fd.write_zeros(align_up(kernel.len(), CROS_ALIGN) - kernel.len())?;
-    fd.write_all(&chromeos_blob_trailer())?;
-    drop(fd);
-    tmp.rename_to(out)?;
-    Ok(())
-}
-
 fn boot_main(cmds: CmdArgs) -> LoggedResult<i32> {
     let mut cmds = cmds.0;
     if cmds.len() < 2 {
@@ -413,16 +375,13 @@ fn boot_main(cmds: CmdArgs) -> LoggedResult<i32> {
                 return log_err!();
             }
         }
-        Action::SignAvb1(SignAvb1 {
+        Action::Sign(Sign {
             img,
             name,
             cert,
             key,
         }) => {
             sign_cmd(&img, name.as_deref(), cert.as_deref(), key.as_deref())?;
-        }
-        Action::SignChromeOs(SignChromeOs { img, out }) => {
-            sign_chromeos_cmd(&img, out.as_deref())?;
         }
         Action::Extract(Extract {
             payload,

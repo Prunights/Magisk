@@ -20,7 +20,7 @@ class ProgressInputStream(
     }
 
     override fun read(): Int {
-        val b = super.read()
+        val b = read()
         if (b >= 0) {
             bytesRead++
             emitProgress()
@@ -34,15 +34,6 @@ class ProgressInputStream(
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
         val sz = super.read(b, off, len)
-        if (sz > 0) {
-            bytesRead += sz
-            emitProgress()
-        }
-        return sz
-    }
-
-    override fun skip(n: Long): Long {
-        val sz = super.skip(n)
         if (sz > 0) {
             bytesRead += sz
             emitProgress()

@@ -22,7 +22,6 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.core.content.getSystemService
-import com.topjohnwu.magisk.core.data.magiskdb.PolicyDao
 import com.topjohnwu.magisk.core.utils.LocaleSetting
 import com.topjohnwu.magisk.core.utils.RootUtils
 import com.topjohnwu.magisk.utils.APKInstall
@@ -104,8 +103,7 @@ fun getProperty(key: String, def: String): String {
 @Throws(PackageManager.NameNotFoundException::class)
 fun PackageManager.getPackageInfo(uid: Int, pid: Int): PackageInfo? {
     val flag = PackageManager.MATCH_UNINSTALLED_PACKAGES
-    val pkgs = getPackagesForUid(PolicyDao.denormalizeUid(uid))
-        ?: throw PackageManager.NameNotFoundException()
+    val pkgs = getPackagesForUid(uid) ?: throw PackageManager.NameNotFoundException()
     if (pkgs.size > 1) {
         if (pid <= 0) {
             return null

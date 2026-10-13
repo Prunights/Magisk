@@ -86,17 +86,17 @@ run_tests() {
   local stub="repackaged.$pkg/$pkg.AppTestRunner"
 
   # Run app tests
-  am_instrument '.SmokeTest,.IntegrationTest' $app
+  am_instrument '.MagiskAppTest,.AdditionalTest' $app
 
   # Test app hiding
   am_instrument '.AppMigrationTest#testAppHide' $self
 
   # Make sure it still works
-  am_instrument '.SmokeTest' $stub
+  am_instrument '.MagiskAppTest' $stub
 
   # Test app restore
   am_instrument '.AppMigrationTest#testAppRestore' $self
 
   # Make sure it still works
-  am_instrument '.SmokeTest' $app
+  am_instrument '.MagiskAppTest' $app
 }

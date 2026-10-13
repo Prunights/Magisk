@@ -20,10 +20,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -58,8 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -92,7 +89,6 @@ fun ModuleScreen(
     viewModel: ModuleViewModel,
     modifier: Modifier = Modifier,
     onRegisterFab: (((() -> Unit)?) -> Unit)? = null,
-    contentFocusRequester: FocusRequester? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -198,7 +194,7 @@ fun ModuleScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(horizontal = 32.dp)
                 ) {
                     Icon(
@@ -218,32 +214,26 @@ fun ModuleScreen(
             return@Scaffold
         }
 
-        val gridState = rememberLazyStaggeredGridState()
-        // Staggered, as cards expand; 360dp leaves room for the action buttons row
-        LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Adaptive(360.dp),
-            state = gridState,
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .padding(padding)
-                .verticalScrollbar(gridState, contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)),
-            contentPadding = PaddingValues(start = 12.dp, top = 16.dp, end = 12.dp, bottom = 92.dp),
-            verticalItemSpacing = 8.dp,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .verticalScrollbar(listState, contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)),
+            contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 80.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item { Spacer(Modifier.height(4.dp)) }
             items(
                 items = uiState.modules,
                 key = { it.module.id },
                 contentType = { "ModuleCard" }
             ) { item ->
-                val isLast = item == uiState.modules.lastOrNull()
                 ModuleCard(
                     item = item,
                     viewModel = viewModel,
-                    modifier = if (isLast && contentFocusRequester != null) {
-                        Modifier.focusRequester(contentFocusRequester)
-                    } else Modifier,
                     onUpdateClick = { onlineModule ->
                         if (onlineModule != null && Info.isConnected.value == true) {
                             pendingOnlineModule = onlineModule
@@ -252,6 +242,7 @@ fun ModuleScreen(
                     }
                 )
             }
+            item { Spacer(Modifier.height(4.dp)) }
         }
     }
 }
@@ -469,7 +460,6 @@ private fun OnlineModuleDialog(
         onDismiss = onDismiss,
         neutralText = stringResource(CoreR.string.download),
         onNeutral = { onDownload(false) },
-        scrollable = true,
     ) {
         MarkdownTextAsync {
             val str = svc.fetchString(item.changelog)

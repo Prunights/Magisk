@@ -22,8 +22,7 @@ class AppMigrationTest {
     companion object {
         private const val APP_PKG = "com.topjohnwu.magisk"
         private const val STUB_PKG = "repackaged.$APP_PKG"
-        // First launch may compile the hidden app's dynamic APK before uninstalling.
-        private const val RECEIVER_TIMEOUT = 30L
+        private const val RECEIVER_TIMEOUT = 20L
     }
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()

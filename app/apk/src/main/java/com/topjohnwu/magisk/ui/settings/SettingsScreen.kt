@@ -3,8 +3,10 @@ package com.topjohnwu.magisk.ui.settings
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,7 +44,6 @@ import com.topjohnwu.magisk.core.model.ColorMode
 import com.topjohnwu.magisk.core.utils.LocaleSetting
 import com.topjohnwu.magisk.core.utils.MediaStoreUtils
 import com.topjohnwu.magisk.ui.ThemeState
-import com.topjohnwu.magisk.ui.component.AdaptiveColumns
 import com.topjohnwu.magisk.ui.component.MagiskDialog
 import com.topjohnwu.magisk.ui.component.SettingsArrow
 import com.topjohnwu.magisk.ui.component.SettingsDropdown
@@ -68,37 +69,27 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
-        // Without root, the Magisk and Superuser sections are hidden, so move the
-        // App section to the second column to avoid leaving it empty.
-        val hasRootSections = Info.env.isActive || Info.showSuperUser
-        // Each section emits a title and a card, so wrap them in a Column to keep them together
-        AdaptiveColumns(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .padding(padding)
                 .verticalScrollbar(scrollState, contentPadding = PaddingValues(vertical = 12.dp))
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            spacing = 16.dp,
-            first = {
-                Column { CustomizationSection(viewModel = viewModel) }
-                if (hasRootSections) {
-                    Column { AppSettingsSection() }
-                }
-            },
-            second = {
-                if (!hasRootSections) {
-                    Column { AppSettingsSection() }
-                }
-                if (Info.env.isActive) {
-                    Column { MagiskSection(viewModel = viewModel) }
-                }
-                if (Info.showSuperUser) {
-                    Column { SuperuserSection(viewModel = viewModel) }
-                }
-            },
-        )
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            CustomizationSection(viewModel = viewModel)
+            Spacer(Modifier.height(16.dp))
+            AppSettingsSection()
+            if (Info.env.isActive) {
+                Spacer(Modifier.height(16.dp))
+                MagiskSection(viewModel = viewModel)
+            }
+            if (Info.showSuperUser) {
+                Spacer(Modifier.height(16.dp))
+                SuperuserSection(viewModel = viewModel)
+            }
+        }
     }
 }
 
@@ -405,6 +396,23 @@ private fun SuperuserSection(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
+        // Tapjack (SDK < S)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            var tapjack by remember { mutableStateOf(Config.suTapjack) }
+            SettingsSwitch(
+                title = stringResource(CoreR.string.settings_su_tapjack_title),
+                summary = stringResource(CoreR.string.settings_su_tapjack_summary),
+                checked = tapjack,
+                onCheckedChange = {
+                    tapjack = it
+                    Config.suTapjack = it
+                }
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+        }
 
         // Authentication
         var suAuth by remember { mutableStateOf(Config.suAuth) }
@@ -429,33 +437,50 @@ private fun SuperuserSection(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
 
-
-        if (!Info.isHeadlessSystemUser) {
-            // Multiuser Mode
-            val multiuserEntries = remember {
-                resources.getStringArray(CoreR.array.multiuser_mode).toList()
-            }
-            val multiuserDescriptions = remember {
-                resources.getStringArray(CoreR.array.multiuser_summary).toList()
-            }
-            var multiuserMode by remember { mutableIntStateOf(Config.suMultiuserMode) }
-            SettingsDropdown(
-                title = stringResource(CoreR.string.multiuser_mode),
-                summary = multiuserDescriptions.getOrElse(multiuserMode) { "" },
-                items = multiuserEntries,
-                selectedIndex = multiuserMode,
-                enabled = Const.USER_ID == 0,
-                onSelectedIndexChange = {
-                    multiuserMode = it
-                    Config.suMultiuserMode = it
-                }
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-            )
+        // Access Mode
+        val accessEntries = remember {
+            resources.getStringArray(CoreR.array.su_access).toList()
         }
+        var accessMode by remember { mutableIntStateOf(Config.rootMode) }
+        SettingsDropdown(
+            title = stringResource(CoreR.string.superuser_access),
+            items = accessEntries,
+            selectedIndex = accessMode,
+            onSelectedIndexChange = {
+                accessMode = it
+                Config.rootMode = it
+            }
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+
+        // Multiuser Mode
+        val multiuserEntries = remember {
+            resources.getStringArray(CoreR.array.multiuser_mode).toList()
+        }
+        val multiuserDescriptions = remember {
+            resources.getStringArray(CoreR.array.multiuser_summary).toList()
+        }
+        var multiuserMode by remember { mutableIntStateOf(Config.suMultiuserMode) }
+        SettingsDropdown(
+            title = stringResource(CoreR.string.multiuser_mode),
+            summary = multiuserDescriptions.getOrElse(multiuserMode) { "" },
+            items = multiuserEntries,
+            selectedIndex = multiuserMode,
+            enabled = Const.USER_ID == 0,
+            onSelectedIndexChange = {
+                multiuserMode = it
+                Config.suMultiuserMode = it
+            }
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
 
         // Mount Namespace Mode
         val namespaceEntries = remember {
@@ -481,6 +506,52 @@ private fun SuperuserSection(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
 
+        // Automatic Response
+        val autoResponseEntries = remember {
+            resources.getStringArray(CoreR.array.auto_response).toList()
+        }
+        var autoResponse by remember { mutableIntStateOf(Config.suAutoResponse) }
+        SettingsDropdown(
+            title = stringResource(CoreR.string.auto_response),
+            items = autoResponseEntries,
+            selectedIndex = autoResponse,
+            onSelectedIndexChange = { newIndex ->
+                val doIt = {
+                    autoResponse = newIndex
+                    Config.suAutoResponse = newIndex
+                }
+                if (Config.suAuth) viewModel.withAuth(doIt) else doIt()
+            }
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+
+        // Request Timeout
+        val timeoutEntries = remember {
+            resources.getStringArray(CoreR.array.request_timeout).toList()
+        }
+        val timeoutValues = remember { listOf(10, 15, 20, 30, 45, 60) }
+        var timeoutIndex by remember {
+            mutableIntStateOf(timeoutValues.indexOf(Config.suDefaultTimeout).coerceAtLeast(0))
+        }
+        SettingsDropdown(
+            title = stringResource(CoreR.string.request_timeout),
+            items = timeoutEntries,
+            selectedIndex = timeoutIndex,
+            onSelectedIndexChange = {
+                timeoutIndex = it
+                Config.suDefaultTimeout = timeoutValues[it]
+            }
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+
         // SU Notification
         val notifEntries = remember {
             resources.getStringArray(CoreR.array.su_notification).toList()
@@ -496,6 +567,23 @@ private fun SuperuserSection(
             }
         )
 
+        // Reauthenticate (SDK < O)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+            var reAuth by remember { mutableStateOf(Config.suReAuth) }
+            SettingsSwitch(
+                title = stringResource(CoreR.string.settings_su_reauth_title),
+                summary = stringResource(CoreR.string.settings_su_reauth_summary),
+                checked = reAuth,
+                onCheckedChange = {
+                    reAuth = it
+                    Config.suReAuth = it
+                }
+            )
+        }
 
         // Restrict (version >= 30.1)
         if (Const.Version.atLeast_30_1()) {

@@ -55,8 +55,9 @@ where
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Default)]
 pub struct DbSettings {
+    pub root_access: RootAccess,
     pub multiuser_mode: MultiuserMode,
     pub mnt_ns: MntNsMode,
     pub boot_count: i32,
@@ -65,7 +66,17 @@ pub struct DbSettings {
 }
 
 #[repr(i32)]
-#[derive(Copy, Clone, Default, FromPrimitive)]
+#[derive(Default, FromPrimitive)]
+pub enum RootAccess {
+    Disabled,
+    AppsOnly,
+    AdbOnly,
+    #[default]
+    AppsAndAdb,
+}
+
+#[repr(i32)]
+#[derive(Default, FromPrimitive)]
 pub enum MultiuserMode {
     #[default]
     OwnerOnly,
@@ -82,6 +93,7 @@ impl Default for MntNsMode {
 impl DbEntryKey {
     fn to_str(self) -> &'static str {
         match self {
+            DbEntryKey::RootAccess => "root_access",
             DbEntryKey::SuMultiuserMode => "multiuser_mode",
             DbEntryKey::SuMntNs => "mnt_ns",
             DbEntryKey::DenylistConfig => "denylist",
@@ -105,6 +117,7 @@ impl SqlTable for DbSettings {
             }
         }
         match key {
+            "root_access" => self.root_access = RootAccess::from_i32(value).unwrap_or_default(),
             "multiuser_mode" => {
                 self.multiuser_mode = MultiuserMode::from_i32(value).unwrap_or_default()
             }
@@ -233,11 +246,9 @@ impl MagiskD {
     }
 
     pub fn get_db_setting(&self, key: DbEntryKey) -> i32 {
-        if self.is_headless && key == DbEntryKey::SuMultiuserMode {
-            return MultiuserMode::User as i32;
-        }
         // Get default values
         let mut val = match key {
+            DbEntryKey::RootAccess => RootAccess::default() as i32,
             DbEntryKey::SuMultiuserMode => MultiuserMode::default() as i32,
             DbEntryKey::SuMntNs => MntNsMode::default().repr,
             DbEntryKey::DenylistConfig => 0,
@@ -266,9 +277,6 @@ impl MagiskD {
         };
         self.db_exec_with_rows("SELECT * FROM settings", &[], &mut cfg)
             .sql_result()?;
-        if self.is_headless {
-            cfg.multiuser_mode = MultiuserMode::User;
-        }
         Ok(cfg)
     }
 

@@ -97,9 +97,7 @@ int denylist_cli(rust::Vec<rust::String> &args) {
     }
 
     // Send request
-    owned_fd fd = connect_daemon(RequestCode::DENYLIST);
-    if (fd < 0) exit(1);
-
+    int fd = connect_daemon(RequestCode::DENYLIST);
     write_int(fd, req);
     if (req == DenyRequest::ADD || req == DenyRequest::REMOVE) {
         write_string(fd, argv[1]);

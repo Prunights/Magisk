@@ -1,5 +1,4 @@
 #![recursion_limit = "256"]
-#![allow(clippy::unwrap_used)]
 
 use proc_macro::TokenStream;
 

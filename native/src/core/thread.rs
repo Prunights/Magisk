@@ -1,5 +1,4 @@
-use crate::new_daemon_thread;
-use base::ResultExt;
+use base::{ResultExt, new_daemon_thread};
 use nix::sys::signal::SigSet;
 use nix::unistd::{getpid, gettid};
 use std::sync::LazyLock;

@@ -22,7 +22,6 @@ data class OnlineModule(
         .replace("'", "").replace("\"", "")
         .replace("$", "").replace("`", "")
         .replace("*", "").replace("/", "_")
-        .replace(Regex("[\\u0000-\\u001F\\u007F:<>?|]"), "_")
         .replace("#", "").replace("@", "")
         .replace("\\", "_")
 }

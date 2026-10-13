@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 data class PolicyItem(
-    var policy: SuPolicy,
+    val policy: SuPolicy,
     val packageName: String,
     val isSharedUid: Boolean,
     val icon: Drawable,
@@ -78,7 +78,7 @@ class SuperuserViewModel(
             for (policy in db.fetchAll()) {
                 val pkgs =
                     if (policy.uid == Process.SYSTEM_UID) arrayOf("android")
-                    else pm.getPackagesForUid(PolicyDao.denormalizeUid(policy.uid))
+                    else pm.getPackagesForUid(policy.uid)
                 if (pkgs == null) {
                     db.delete(policy.uid)
                     continue
@@ -176,6 +176,8 @@ class SuperuserViewModel(
                         }
                     )
                 }
+                val res = if (newPolicy >= SuPolicy.ALLOW) R.string.su_snack_grant else R.string.su_snack_deny
+                showSnackbar(AppContext.getString(res, item.appName))
             }
         }
 

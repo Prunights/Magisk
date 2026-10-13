@@ -1,9 +1,6 @@
 use crate::consts::{DATABIN, LOG_PIPE, MAGISK_LOG_CON, MAGISKDB, MODULEROOT, SECURE_DIR};
 use crate::ffi::get_magisk_tmp;
-use base::{
-    Directory, FsPathBuilder, LoggedResult, ResultExt, Utf8CStr, Utf8CStrBuf, WalkResult, cstr,
-    libc, pre_order_walk,
-};
+use base::{Directory, FsPathBuilder, LoggedResult, ResultExt, Utf8CStr, Utf8CStrBuf, cstr, libc};
 use nix::fcntl::OFlag;
 use std::io::Write;
 
@@ -83,14 +80,16 @@ pub(crate) fn restore_tmpcon() -> LoggedResult<()> {
         unsafe { libc::chmod(tmp.as_ptr(), 0o711) };
     }
 
-    pre_order_walk(tmp, |e, path| {
+    let mut path = cstr::buf::default();
+    let mut dir = Directory::open(tmp)?;
+    while let Some(ref e) = dir.read()? {
         if !e.is_symlink() {
+            e.resolve_path(&mut path)?;
             path.set_secontext(SYSTEM_CON).log_ok();
         }
-        Ok(WalkResult::Skip)
-    })?;
+    }
 
-    let mut path = cstr::buf::default();
+    path.clear();
     path.append_path(tmp).append_path(LOG_PIPE);
     path.set_secontext(cstr!(MAGISK_LOG_CON))?;
 
