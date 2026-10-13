@@ -20,7 +20,10 @@ android {
     namespace = "com.topjohnwu.magisk.core"
 
     defaultConfig {
-        buildConfigField("String", "APP_PACKAGE_NAME", "\"com.topjohnwu.magisk\"")
+        // CUSTOM BUILD: must match the applicationId set in Setup.kt, because
+        // the runtime compares packageName against this value to decide whether
+        // it is running as the real manager or as the hidden stub.
+        buildConfigField("String", "APP_PACKAGE_NAME", "\"com.topjohnwu.magisk.watch\"")
         buildConfigField("int", "APP_VERSION_CODE", "${Config.versionCode}")
         buildConfigField("String", "APP_VERSION_NAME", "\"${Config.version}\"")
         buildConfigField("int", "STUB_VERSION", Config.stubVersion)

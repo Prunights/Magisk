@@ -17,7 +17,8 @@ android {
     val url = base + "v${Config.version}/Magisk-v${Config.version}.apk"
 
     defaultConfig {
-        applicationId = "com.topjohnwu.magisk"
+        // CUSTOM BUILD: keep in step with the main APK's applicationId.
+        applicationId = "com.topjohnwu.magisk.watch"
         versionCode = 1
         versionName = "1.0"
         buildConfigField("String", "APK_URL", "\"$url\"")

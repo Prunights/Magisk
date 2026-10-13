@@ -43,7 +43,9 @@ import javax.crypto.spec.SecretKeySpec;
 public class DownloadActivity extends Activity {
 
     private static final String APP_NAME = "Magisk";
-    private static final String RES_PKG_NAME = "com.topjohnwu.magisk";
+    // CUSTOM BUILD: matches the applicationId of this watch build; the stub
+    // resolves its own strings from the manager package by name.
+    private static final String RES_PKG_NAME = "com.topjohnwu.magisk.watch";
 
     private boolean dynLoad;
 

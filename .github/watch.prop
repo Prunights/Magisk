@@ -5,3 +5,14 @@
 # APK at roughly half the size of the stock all-ABI build and shortens
 # the native compile step.
 abiList=armeabi-v7a
+
+# Version string shown in the app.
+#
+# Without this the build falls back to the git HEAD short hash, which is what
+# made the manager report a mismatch and offer "repair environment" against a
+# stock install. A readable version avoids that entirely.
+version=31.0-watch
+
+# Keep the upstream version code so the manager still compares equal to the
+# v31 daemon it ships with.
+versionCode=31000

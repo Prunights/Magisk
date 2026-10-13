@@ -89,7 +89,6 @@ import com.topjohnwu.magisk.core.ktx.toast
 import com.topjohnwu.magisk.core.tasks.AppMigration
 import com.topjohnwu.magisk.core.tasks.MagiskInstaller
 import com.topjohnwu.magisk.ui.MainActivity
-import com.topjohnwu.magisk.ui.component.AdaptiveColumns
 import com.topjohnwu.magisk.ui.component.MagiskDialog
 import com.topjohnwu.magisk.ui.component.MarkdownTextAsync
 import com.topjohnwu.magisk.ui.component.rememberLoadingDialog
@@ -269,7 +268,7 @@ fun HomeScreen(
             )
         }
     ) { padding ->
-        AdaptiveColumns(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
@@ -277,53 +276,51 @@ fun HomeScreen(
                 .verticalScrollbar(scrollState, contentPadding = PaddingValues(vertical = 12.dp))
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            spacing = 12.dp,
-            first = {
-                if (uiState.isNoticeVisible) {
-                    NoticeCard(onHide = viewModel::hideNotice)
-                }
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (uiState.isNoticeVisible) {
+                NoticeCard(onHide = viewModel::hideNotice)
+            }
 
-                CoreCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    state = uiState.magiskState,
-                    version = uiState.magiskInstalledVersion,
-                    onInstallClicked = { showInstallDialog = true }
-                )
+            CoreCard(
+                modifier = Modifier.fillMaxWidth(),
+                state = uiState.magiskState,
+                version = uiState.magiskInstalledVersion,
+                onInstallClicked = { showInstallDialog = true }
+            )
 
-                StatusCard()
+            StatusCard()
 
-                AppCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    state = uiState.appState,
-                    version = uiState.managerInstalledVersion,
-                    remoteVersion = uiState.managerRemoteVersion,
-                    progress = uiState.managerProgress,
-                    isHidden = context.packageName != BuildConfig.APP_PACKAGE_NAME,
-                    onManagerPressed = viewModel::onManagerPressed,
-                    onHideRestorePressed = viewModel::onHideRestorePressed,
-                )
-            },
-            second = {
-                Text(
-                    text = stringResource(CoreR.string.home_support_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                )
+            AppCard(
+                modifier = Modifier.fillMaxWidth(),
+                state = uiState.appState,
+                version = uiState.managerInstalledVersion,
+                remoteVersion = uiState.managerRemoteVersion,
+                progress = uiState.managerProgress,
+                isHidden = context.packageName != BuildConfig.APP_PACKAGE_NAME,
+                onManagerPressed = viewModel::onManagerPressed,
+                onHideRestorePressed = viewModel::onHideRestorePressed,
+            )
 
-                SupportCard(onLinkClicked = viewModel::onLinkPressed)
+            Text(
+                text = stringResource(CoreR.string.home_support_title),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+            )
 
-                Text(
-                    text = stringResource(CoreR.string.home_follow_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                )
-                DevelopersCard(onLinkClicked = viewModel::onLinkPressed)
-            },
-        )
+            SupportCard(onLinkClicked = viewModel::onLinkPressed)
+
+            Text(
+                text = stringResource(CoreR.string.home_follow_title),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+            )
+            DevelopersCard(onLinkClicked = viewModel::onLinkPressed)
+        }
     }
 
     InstallDialog(
@@ -800,6 +797,17 @@ private fun SupportCard(
 private data class LinkInfo(val label: Int, val icon: Int, val url: String)
 private data class DeveloperInfo(val name: String, val links: List<LinkInfo>)
 
+/**
+ * CUSTOM BUILD: the maintainer of this watch-specific build.
+ *
+ * This port exists because the stock manager cannot be used on a 402x476
+ * panel at the factory 320 dpi, and because the daemon has to be rebuilt with
+ * its manager certificate check disabled for a locally signed APK to survive.
+ * Shown as its own row below the upstream developers.
+ */
+private const val WATCH_BUILDER_NAME = "Prunights"
+private const val WATCH_BUILDER_GITHUB = "https://github.com/Prunights"
+
 private val developers = listOf(
     DeveloperInfo("topjohnwu", listOf(
         LinkInfo(CoreR.string.twitter, CoreR.drawable.ic_twitter, "https://x.com/topjohnwu"),
@@ -869,6 +877,39 @@ private fun DevelopersCard(
                     )
                 }
             }
+
+            // CUSTOM BUILD: watch port maintainer, listed after the upstream
+            // developers so the original credits stay untouched.
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(horizontal = 18.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = buildString {
+                        append("@")
+                        append(WATCH_BUILDER_NAME)
+                        append("  ·  watch build")
+                    },
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = { onLinkClicked(WATCH_BUILDER_GITHUB) }) {
+                        Icon(
+                            painter = painterResource(CoreR.drawable.ic_github),
+                            contentDescription = stringResource(CoreR.string.github),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -908,7 +949,6 @@ private fun ManagerInstallComposableDialog(
         onConfirm = onInstall,
         dismissText = stringResource(android.R.string.cancel),
         onDismiss = onDismiss,
-        scrollable = true,
     ) {
         MarkdownTextAsync {
             val text = Info.update.note
