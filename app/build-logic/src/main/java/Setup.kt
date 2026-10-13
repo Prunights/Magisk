@@ -101,18 +101,15 @@ private fun Project.downloadFile(url: String, checksum: String): File {
     return file
 }
 
-// CUSTOM BUILD: GitHub release downloads are not reachable from this machine,
-// so busybox / bootctl are re-packed locally out of the official Magisk APK
-// (same binaries, different zip container => different SHA-256).
 const val BUSYBOX_DOWNLOAD_URL =
-    "file:///C:/Users/Administrator/Documents/deepseek-harness/default-workspace/busybox-manual.zip"
+    "https://github.com/topjohnwu/magisk-files/releases/download/files/busybox-1.36.1.1.zip"
 const val BUSYBOX_ZIP_CHECKSUM =
-    "176c21de7f602918d19ee8c1d1659f2220689cba66ddf0f80e2e8de6a370dbda"
+    "b4d0551feabaf314e53c79316c980e8f66432e9fb91a69dbbf10a93564b40951"
 
 const val BOOTCTL_DOWNLOAD_URL =
-    "file:///C:/Users/Administrator/Documents/deepseek-harness/default-workspace/bootctl-manual.zip"
+    "https://github.com/topjohnwu/magisk-files/releases/download/files/bootctl-android-14.0.0_r1.zip"
 const val BOOTCTL_ZIP_CHECKSUM =
-    "3f1a28b063a1c17085f74d80056787d13dae307a832037fce0bdb53ab2902095"
+    "2cf515aeb17259e88393a1322671ebab1968925864bc04ae57dad54e53ccf15b"
 
 private abstract class SyncWithDir : Sync() {
     @get:OutputDirectory
