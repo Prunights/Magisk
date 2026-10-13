@@ -1,6 +1,7 @@
 #pragma once
 
-#define JAVA_PACKAGE_NAME "com.topjohnwu.magisk"
+// CUSTOM BUILD: keep in step with consts.rs and the APK's applicationId.
+#define JAVA_PACKAGE_NAME "com.topjohnwu.magisk.watch"
 #define SECURE_DIR      "/data/adb"
 #define MODULEROOT      SECURE_DIR "/modules"
 #define DATABIN         SECURE_DIR "/magisk"

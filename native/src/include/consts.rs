@@ -11,7 +11,11 @@ pub const APPLET_NAMES: &[&str] = &["su", "resetprop"];
 pub use flags::*;
 pub const MAGISK_FULL_VER: &str = concatcp!(MAGISK_VERSION, "(", MAGISK_VER_CODE, ")");
 
-pub const APP_PACKAGE_NAME: &str = "com.topjohnwu.magisk";
+// CUSTOM BUILD: must match the applicationId of this watch build. The daemon
+// looks the manager APK up by this name (see core/package.rs), so leaving the
+// upstream value here makes the manager report "not installed" even though the
+// su socket is working.
+pub const APP_PACKAGE_NAME: &str = "com.topjohnwu.magisk.watch";
 
 pub const LOGFILE: &str = "/cache/magisk.log";
 
